@@ -25,3 +25,10 @@ CHUNK_SIZE = 1500
 CHUNK_OVERLAP = 150
 TOP_K = 6
 MIN_SCORE = 0.25  # abaixo disso o trecho é considerado irrelevante
+
+# Imagens: PDFs originais (só para extrair figuras, não são indexados como texto)
+PDFS_DIR = BASE_DIR / "pdfs"
+IMAGES_DIR = BASE_DIR / "images"
+MAX_IMAGES = 4  # por resposta
+IMAGE_DOCS = 2  # de quantos trechos (os mais relevantes) vêm as imagens
+IMAGE_SCORE_MARGIN = 0.05  # só trechos quase tão relevantes quanto o melhor

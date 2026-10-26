@@ -82,6 +82,7 @@ class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
     query: str
     cached: str
+    images: list[str]
     docs: list[Document]
 
 
@@ -104,7 +105,9 @@ def rewrite(state: State) -> dict:
 
 
 def lookup(state: State) -> dict:
-    return {"cached": cache.get(state["query"]) or ""}
+    hit = cache.get(state["query"])
+    # "images" é zerado a cada pergunta (o estado persiste entre turnos)
+    return {"cached": hit[0], "images": hit[1]} if hit else {"cached": "", "images": []}
 
 
 def route_cache(state: State) -> str:
@@ -119,11 +122,33 @@ def retrieve(state: State) -> dict:
     results = vectorstore.similarity_search_with_relevance_scores(
         state["query"], k=config.TOP_K
     )
-    return {"docs": [d for d, score in results if score >= config.MIN_SCORE]}
+    docs = []
+    for d, score in results:
+        if score >= config.MIN_SCORE:
+            d.metadata["score"] = score
+            docs.append(d)
+    return {"docs": docs}
 
 
 def route(state: State) -> str:
     return "generate" if state["docs"] else "not_found"
+
+
+def pick_images(docs: list[Document]) -> list[str]:
+    """Imagens dos trechos mais relevantes (não de todos os recuperados)."""
+    ranked = sorted(docs, key=lambda d: d.metadata.get("score", 0), reverse=True)
+    if not ranked:
+        return []
+    top = ranked[0].metadata.get("score", 0)
+    chosen = [
+        d for d in ranked if d.metadata.get("score", 0) >= top - config.IMAGE_SCORE_MARGIN
+    ][: config.IMAGE_DOCS]
+    paths: list[str] = []
+    for d in chosen:
+        for p in filter(None, d.metadata.get("images", "").split("|")):
+            if p not in paths:
+                paths.append(p)
+    return paths[: config.MAX_IMAGES]
 
 
 def generate(state: State) -> dict:
@@ -138,8 +163,9 @@ def generate(state: State) -> dict:
     )
     sources = sorted({d.metadata["source"] for d in state["docs"]})
     text = f"{text_of(answer.content).strip()}\n\n📚 Fontes: {', '.join(sources)}"
-    cache.put(state["query"], text)
-    return {"messages": [AIMessage(text)]}
+    images = pick_images(state["docs"])
+    cache.put(state["query"], text, images)
+    return {"messages": [AIMessage(text)], "images": images}
 
 
 def not_found(state: State) -> dict:

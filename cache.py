@@ -1,4 +1,5 @@
 """Cache de respostas em SQLite: pergunta repetida não gasta tokens do LLM."""
+import json
 import re
 import sqlite3
 import unicodedata
@@ -15,6 +16,10 @@ def _connect() -> sqlite3.Connection:
         "key TEXT PRIMARY KEY, answer TEXT NOT NULL, "
         "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
     )
+    try:  # bancos criados antes de existir o suporte a imagens
+        con.execute("ALTER TABLE answers ADD COLUMN images TEXT NOT NULL DEFAULT '[]'")
+    except sqlite3.OperationalError:
+        pass
     return con
 
 
@@ -25,22 +30,25 @@ def normalize(question: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", s)).strip()
 
 
-def get(question: str) -> str | None:
+def get(question: str) -> tuple[str, list[str]] | None:
     key = normalize(question)
     if not key:
         return None
     with _connect() as con:
-        row = con.execute("SELECT answer FROM answers WHERE key = ?", (key,)).fetchone()
-    return row[0] if row else None
+        row = con.execute(
+            "SELECT answer, images FROM answers WHERE key = ?", (key,)
+        ).fetchone()
+    return (row[0], json.loads(row[1])) if row else None
 
 
-def put(question: str, answer: str) -> None:
+def put(question: str, answer: str, images: list[str] | None = None) -> None:
     key = normalize(question)
     if not key:
         return
     with _connect() as con:
         con.execute(
-            "INSERT OR REPLACE INTO answers (key, answer) VALUES (?, ?)", (key, answer)
+            "INSERT OR REPLACE INTO answers (key, answer, images) VALUES (?, ?, ?)",
+            (key, answer, json.dumps(images or [])),
         )
 
 

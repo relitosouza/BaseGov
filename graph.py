@@ -8,6 +8,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
+import cache
 import config
 from ingest import get_embeddings
 
@@ -80,6 +81,7 @@ def text_of(content) -> str:
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
     query: str
+    cached: str
     docs: list[Document]
 
 
@@ -99,6 +101,18 @@ def rewrite(state: State) -> dict:
         f"Histórico:\n{history}\n\nÚltima pergunta: {question}"
     )
     return {"query": text_of(out.content).strip()}
+
+
+def lookup(state: State) -> dict:
+    return {"cached": cache.get(state["query"]) or ""}
+
+
+def route_cache(state: State) -> str:
+    return "from_cache" if state["cached"] else "retrieve"
+
+
+def from_cache(state: State) -> dict:
+    return {"messages": [AIMessage(state["cached"])]}
 
 
 def retrieve(state: State) -> dict:
@@ -123,9 +137,9 @@ def generate(state: State) -> dict:
         [SystemMessage(SYSTEM_PROMPT.format(context=context)), *state["messages"][-7:]]
     )
     sources = sorted({d.metadata["source"] for d in state["docs"]})
-    return {
-        "messages": [AIMessage(f"{text_of(answer.content).strip()}\n\n📚 Fontes: {', '.join(sources)}")]
-    }
+    text = f"{text_of(answer.content).strip()}\n\n📚 Fontes: {', '.join(sources)}"
+    cache.put(state["query"], text)
+    return {"messages": [AIMessage(text)]}
 
 
 def not_found(state: State) -> dict:
@@ -135,11 +149,15 @@ def not_found(state: State) -> dict:
 def build_graph():
     g = StateGraph(State)
     g.add_node("rewrite", rewrite)
+    g.add_node("lookup", lookup)
+    g.add_node("from_cache", from_cache)
     g.add_node("retrieve", retrieve)
     g.add_node("generate", generate)
     g.add_node("not_found", not_found)
     g.add_edge(START, "rewrite")
-    g.add_edge("rewrite", "retrieve")
+    g.add_edge("rewrite", "lookup")
+    g.add_conditional_edges("lookup", route_cache, ["from_cache", "retrieve"])
+    g.add_edge("from_cache", END)
     g.add_conditional_edges("retrieve", route, ["generate", "not_found"])
     g.add_edge("generate", END)
     g.add_edge("not_found", END)

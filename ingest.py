@@ -9,6 +9,7 @@ from langchain_text_splitters import (
     RecursiveCharacterTextSplitter,
 )
 
+import cache
 import config
 
 LOADERS = {
@@ -83,6 +84,7 @@ def main():
         persist_directory=str(config.CHROMA_DIR),
         collection_metadata={"hnsw:space": "cosine"},
     )
+    cache.clear()  # respostas antigas podem estar desatualizadas
     print(f"Indexados {len(chunks)} trechos de {len(docs)} páginas/arquivos.")
 
 

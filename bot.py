@@ -1,4 +1,5 @@
 import logging
+import os
 
 from langchain_core.messages import HumanMessage
 from telegram import Update
@@ -15,7 +16,10 @@ import config
 from graph import build_graph
 
 logging.basicConfig(level=logging.INFO)
+# evita imprimir o token do bot (vai na URL) nos logs
+logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("manual-bot")
+DEBUG = os.getenv("DEBUG") == "1"
 
 graph = build_graph()
 
@@ -35,9 +39,11 @@ async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
             config={"configurable": {"thread_id": str(chat_id)}},
         )
         text = result["messages"][-1].content
-    except Exception:
+    except Exception as e:
         log.exception("Erro ao processar pergunta")
         text = "Ocorreu um erro ao processar sua pergunta. Tente novamente."
+        if DEBUG:
+            text += f"\n\n[debug] {type(e).__name__}: {str(e)[:500]}"
     # Telegram limita mensagens a 4096 caracteres
     for i in range(0, len(text), 4000):
         await update.message.reply_text(text[i : i + 4000])

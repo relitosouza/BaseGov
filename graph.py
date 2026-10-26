@@ -34,13 +34,19 @@ def build_llm():
     if config.LLM_PROVIDER == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        # lê a chave de GOOGLE_API_KEY
-        return ChatGoogleGenerativeAI(
-            model=config.LLM_MODEL,
-            temperature=0,
-            timeout=config.LLM_TIMEOUT,
-            max_retries=2,
-        )
+        def gemini(model: str):
+            # lê a chave de GOOGLE_API_KEY
+            return ChatGoogleGenerativeAI(
+                model=model,
+                temperature=0,
+                timeout=config.LLM_TIMEOUT,
+                max_retries=4,  # 503/429 são comuns e passageiros
+            )
+
+        primary = gemini(config.LLM_MODEL)
+        backups = [gemini(m) for m in config.LLM_FALLBACK_MODELS]
+        # se o modelo principal falhar mesmo após as tentativas, usa os reservas
+        return primary.with_fallbacks(backups) if backups else primary
     # NVIDIA lê a chave de NVIDIA_API_KEY
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
 

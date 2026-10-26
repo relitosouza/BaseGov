@@ -4,7 +4,10 @@ import shutil
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import (
+    MarkdownHeaderTextSplitter,
+    RecursiveCharacterTextSplitter,
+)
 
 import config
 
@@ -35,14 +38,44 @@ def load_documents():
     return docs
 
 
+HEADERS = [("#", "h1"), ("##", "h2"), ("###", "h3")]
+
+
+def is_toc(text: str) -> bool:
+    """Sumário: maioria das linhas são links markdown de índice."""
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    links = [l for l in lines if l.lstrip("- ").startswith("[")]
+    return bool(lines) and len(links) / len(lines) > 0.5
+
+
+def split_documents(docs):
+    """Markdown é dividido por seção (título + corpo juntos); o resto, por tamanho."""
+    size = RecursiveCharacterTextSplitter(
+        chunk_size=config.CHUNK_SIZE, chunk_overlap=config.CHUNK_OVERLAP
+    )
+    md = MarkdownHeaderTextSplitter(HEADERS, strip_headers=False)
+    chunks = []
+    for d in docs:
+        if not d.metadata["source"].lower().endswith(".md"):
+            chunks += size.split_documents([d])
+            continue
+        for sec in md.split_text(d.page_content):
+            if is_toc(sec.page_content) or sec.metadata.get("h2") == "Sumário":
+                continue
+            sec.metadata["source"] = d.metadata["source"]
+            path = " > ".join(
+                sec.metadata[k] for k in ("h1", "h2", "h3") if k in sec.metadata
+            )
+            sec.page_content = f"[{path}]\n{sec.page_content}" if path else sec.page_content
+            chunks += size.split_documents([sec])
+    return chunks
+
+
 def main():
     docs = load_documents()
     if not docs:
         raise SystemExit(f"Nenhum manual encontrado em {config.MANUALS_DIR}")
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=config.CHUNK_SIZE, chunk_overlap=config.CHUNK_OVERLAP
-    )
-    chunks = splitter.split_documents(docs)
+    chunks = split_documents(docs)
     shutil.rmtree(config.CHROMA_DIR, ignore_errors=True)
     Chroma.from_documents(
         chunks,

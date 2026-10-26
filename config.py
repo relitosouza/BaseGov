@@ -16,7 +16,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "meta/llama-3.2-90b-vision-instruct")
 # Embeddings locais e multilíngues (bom para português)
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
-CHUNK_SIZE = 1000
+CHUNK_SIZE = 1500
 CHUNK_OVERLAP = 150
-TOP_K = 4
+TOP_K = 6
 MIN_SCORE = 0.25  # abaixo disso o trecho é considerado irrelevante

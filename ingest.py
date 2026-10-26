@@ -16,7 +16,10 @@ LOADERS = {
 
 
 def get_embeddings():
-    return HuggingFaceEmbeddings(model_name=config.EMBEDDING_MODEL)
+    return HuggingFaceEmbeddings(
+        model_name=config.EMBEDDING_MODEL,
+        encode_kwargs={"normalize_embeddings": True},
+    )
 
 
 def load_documents():
@@ -42,7 +45,10 @@ def main():
     chunks = splitter.split_documents(docs)
     shutil.rmtree(config.CHROMA_DIR, ignore_errors=True)
     Chroma.from_documents(
-        chunks, get_embeddings(), persist_directory=str(config.CHROMA_DIR)
+        chunks,
+        get_embeddings(),
+        persist_directory=str(config.CHROMA_DIR),
+        collection_metadata={"hnsw:space": "cosine"},
     )
     print(f"Indexados {len(chunks)} trechos de {len(docs)} páginas/arquivos.")
 

@@ -41,7 +41,9 @@ def build_llm():
 
 llm = build_llm()
 vectorstore = Chroma(
-    persist_directory=str(config.CHROMA_DIR), embedding_function=get_embeddings()
+    persist_directory=str(config.CHROMA_DIR),
+    embedding_function=get_embeddings(),
+    collection_metadata={"hnsw:space": "cosine"},
 )
 
 

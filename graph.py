@@ -1,7 +1,6 @@
 """Grafo LangGraph: reescreve a pergunta -> busca nos manuais -> responde (ou admite que não sabe)."""
 from typing import Annotated, TypedDict
 
-from langchain_anthropic import ChatAnthropic
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
@@ -25,7 +24,22 @@ manual. Nunca invente informações.
 Trechos dos manuais:
 {context}"""
 
-llm = ChatAnthropic(model=config.LLM_MODEL, temperature=0)
+
+
+def build_llm():
+    if config.LLM_PROVIDER == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+
+        return ChatAnthropic(model=config.LLM_MODEL, temperature=0)
+    # NVIDIA lê a chave de NVIDIA_API_KEY
+    from langchain_nvidia_ai_endpoints import ChatNVIDIA
+
+    return ChatNVIDIA(
+        model=config.LLM_MODEL, temperature=0, max_completion_tokens=1024
+    )
+
+
+llm = build_llm()
 vectorstore = Chroma(
     persist_directory=str(config.CHROMA_DIR), embedding_function=get_embeddings()
 )

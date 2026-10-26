@@ -34,9 +34,12 @@ def build_llm():
     # NVIDIA lê a chave de NVIDIA_API_KEY
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
-    return ChatNVIDIA(
+    chat = ChatNVIDIA(
         model=config.LLM_MODEL, temperature=0, max_completion_tokens=1024
     )
+    # o padrão (60s) estoura com modelos grandes no plano gratuito
+    chat._client.timeout = config.LLM_TIMEOUT
+    return chat
 
 
 llm = build_llm()

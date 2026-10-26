@@ -11,6 +11,7 @@ CHROMA_DIR = BASE_DIR / "chroma_db"
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "nvidia")  # nvidia | anthropic
+LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "180"))  # segundos
 LLM_MODEL = os.getenv("LLM_MODEL", "meta/llama-3.2-90b-vision-instruct")
 # Embeddings locais e multilíngues (bom para português)
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"

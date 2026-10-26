@@ -66,6 +66,17 @@ vectorstore = Chroma(
 )
 
 
+def text_of(content) -> str:
+    """Extrai só o texto da resposta (alguns modelos devolvem uma lista de blocos)."""
+    if isinstance(content, str):
+        return content
+    return "".join(
+        b if isinstance(b, str) else b.get("text", "")
+        for b in content
+        if isinstance(b, str) or b.get("type") == "text"
+    )
+
+
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
     query: str
@@ -75,11 +86,11 @@ class State(TypedDict):
 def rewrite(state: State) -> dict:
     """Transforma a última pergunta em uma consulta autônoma, usando o histórico."""
     msgs = state["messages"]
-    question = msgs[-1].content
+    question = text_of(msgs[-1].content)
     if len(msgs) < 2:
         return {"query": question}
     history = "\n".join(
-        f"{'Usuário' if isinstance(m, HumanMessage) else 'Bot'}: {m.content}"
+        f"{'Usuário' if isinstance(m, HumanMessage) else 'Bot'}: {text_of(m.content)}"
         for m in msgs[-7:-1]
     )
     out = llm.invoke(
@@ -87,7 +98,7 @@ def rewrite(state: State) -> dict:
         "usando o histórico. Responda apenas com a pergunta.\n\n"
         f"Histórico:\n{history}\n\nÚltima pergunta: {question}"
     )
-    return {"query": out.content.strip()}
+    return {"query": text_of(out.content).strip()}
 
 
 def retrieve(state: State) -> dict:
@@ -113,7 +124,7 @@ def generate(state: State) -> dict:
     )
     sources = sorted({d.metadata["source"] for d in state["docs"]})
     return {
-        "messages": [AIMessage(f"{answer.content}\n\n📚 Fontes: {', '.join(sources)}")]
+        "messages": [AIMessage(f"{text_of(answer.content).strip()}\n\n📚 Fontes: {', '.join(sources)}")]
     }
 
 

@@ -31,6 +31,16 @@ def build_llm():
         from langchain_anthropic import ChatAnthropic
 
         return ChatAnthropic(model=config.LLM_MODEL, temperature=0)
+    if config.LLM_PROVIDER == "gemini":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        # lê a chave de GOOGLE_API_KEY
+        return ChatGoogleGenerativeAI(
+            model=config.LLM_MODEL,
+            temperature=0,
+            timeout=config.LLM_TIMEOUT,
+            max_retries=2,
+        )
     # NVIDIA lê a chave de NVIDIA_API_KEY
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
 

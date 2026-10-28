@@ -1,4 +1,5 @@
 """Grafo LangGraph: reescreve a pergunta -> busca nos manuais -> responde (ou admite que não sabe)."""
+import re
 from typing import Annotated, TypedDict
 
 from langchain_chroma import Chroma
@@ -18,9 +19,16 @@ NOT_FOUND = (
 )
 
 SYSTEM_PROMPT = """Você é um assistente de suporte que responde SOMENTE com base nos trechos \
-dos manuais fornecidos abaixo. Responda em português, de forma clara e objetiva, com passos \
-numerados quando for um procedimento. Se os trechos não bastarem, diga que não encontrou no \
-manual. Nunca invente informações.
+dos manuais fornecidos abaixo. Responda em português, de forma clara, didática e com passos \
+numerados bem detalhados quando for um procedimento.
+
+IMPORTANTE SOBRE IMAGENS:
+Cada trecho abaixo pode indicar uma ou mais imagens disponíveis com a marcação [FIGURA: caminho/imagem.png].
+Sempre que você descrever uma tela, menu, formulário ou botão correspondente àquela figura, inclua \
+a marcação exata [IMG: caminho/imagem.png] em uma linha separada logo após o parágrafo ou passo correspondente.
+Nunca invente nomes de imagens: use apenas as que aparecem no contexto.
+
+Se os trechos não bastarem para responder, diga que não encontrou no manual. Nunca invente informações.
 
 Trechos dos manuais:
 {context}"""
@@ -115,27 +123,49 @@ def route_cache(state: State) -> str:
 
 
 def from_cache(state: State) -> dict:
-    return {"messages": [AIMessage(state["cached"])]}
+    return {
+        "messages": [AIMessage(state["cached"])],
+        "images": state.get("images", []),
+    }
 
 
 def retrieve(state: State) -> dict:
+    # Busca um conjunto mais amplo para poder agrupar por manual
     results = vectorstore.similarity_search_with_relevance_scores(
-        state["query"], k=config.TOP_K
+        state["query"], k=10
     )
     docs = []
     for d, score in results:
         if score >= config.MIN_SCORE:
             d.metadata["score"] = score
             docs.append(d)
-    return {"docs": docs}
+
+    if not docs:
+        return {"docs": []}
+
+    # Identifica o manual mais relevante para priorizar suas informações e imagens
+    best_source = docs[0].metadata.get("source")
+    # Mantém os trechos do manual principal e trechos de altíssima relevância
+    filtered = [
+        d for d in docs
+        if d.metadata.get("source") == best_source or d.metadata.get("score", 0) >= docs[0].metadata.get("score", 0) - 0.03
+    ][: config.TOP_K]
+
+    return {"docs": filtered}
 
 
 def route(state: State) -> str:
     return "generate" if state["docs"] else "not_found"
 
 
+def _image_sort_key(path: str):
+    # Ordena naturalmente por números: ex. _p1_1, _p1_2, _p2_1 ou _s1_1, _s1_2
+    parts = re.split(r"(\d+)", path)
+    return [int(p) if p.isdigit() else p for p in parts]
+
+
 def pick_images(docs: list[Document]) -> list[str]:
-    """Imagens dos trechos mais relevantes (não de todos os recuperados)."""
+    """Imagens dos trechos mais relevantes, preservando a ordem cronológica do manual."""
     ranked = sorted(docs, key=lambda d: d.metadata.get("score", 0), reverse=True)
     if not ranked:
         return []
@@ -143,27 +173,56 @@ def pick_images(docs: list[Document]) -> list[str]:
     chosen = [
         d for d in ranked if d.metadata.get("score", 0) >= top - config.IMAGE_SCORE_MARGIN
     ][: config.IMAGE_DOCS]
+
+    # Ordena os trechos pela ordem natural do documento (source e página/posição)
+    chosen = sorted(
+        chosen,
+        key=lambda d: (
+            d.metadata.get("source", ""),
+            d.metadata.get("page", 0),
+        ),
+    )
+
     paths: list[str] = []
     for d in chosen:
-        for p in filter(None, d.metadata.get("images", "").split("|")):
+        raw_imgs = [p for p in d.metadata.get("images", "").split("|") if p]
+        # Ordena as imagens do trecho sequencialmente
+        raw_imgs = sorted(raw_imgs, key=_image_sort_key)
+        for p in raw_imgs:
             if p not in paths:
                 paths.append(p)
     return paths[: config.MAX_IMAGES]
 
 
 def generate(state: State) -> dict:
-    context = "\n\n".join(
-        f"[{d.metadata['source']}"
-        + (f", pág. {d.metadata['page'] + 1}" if "page" in d.metadata else "")
-        + f"]\n{d.page_content}"
-        for d in state["docs"]
-    )
+    context_parts = []
+    available_images: list[str] = []
+
+    for d in state["docs"]:
+        header = f"[{d.metadata['source']}" + (f", pág. {d.metadata['page'] + 1}" if "page" in d.metadata else "") + "]"
+        imgs = [p for p in d.metadata.get("images", "").split("|") if p]
+        fig_text = ""
+        if imgs:
+            available_images.extend(imgs)
+            fig_text = "\nImagens deste trecho:\n" + "\n".join(f"[FIGURA: {p}]" for p in imgs)
+        context_parts.append(f"{header}\n{d.page_content}{fig_text}")
+
+    context = "\n\n".join(context_parts)
     answer = llm.invoke(
         [SystemMessage(SYSTEM_PROMPT.format(context=context)), *state["messages"][-7:]]
     )
+    raw_text = text_of(answer.content).strip()
+
+    # Extrai imagens mencionadas inline na resposta [IMG: caminho]
+    inline_imgs = re.findall(r"\[IMG:\s*([^\]]+)\]", raw_text)
+    inline_imgs = [img.strip() for img in inline_imgs if img.strip() in available_images]
+
+    # Se o LLM não colocou tags inline, usa pick_images como fallback
+    fallback_imgs = pick_images(state["docs"])
+    images = inline_imgs if inline_imgs else fallback_imgs
+
     sources = sorted({d.metadata["source"] for d in state["docs"]})
-    text = f"{text_of(answer.content).strip()}\n\n📚 Fontes: {', '.join(sources)}"
-    images = pick_images(state["docs"])
+    text = f"{raw_text}\n\n📚 Fontes: {', '.join(sources)}"
     cache.put(state["query"], text, images)
     return {"messages": [AIMessage(text)], "images": images}
 
